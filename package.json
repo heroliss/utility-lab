@@ -1,0 +1,21 @@
+{
+  "name": "liss-utilities",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test tests/*.test.js",
+    "data": "node scripts/build-unicode.js"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0",
+    "fflate": "0.8.3"
+  },
+  "devDependencies": {
+    "prettier": "3.9.10",
+    "vite": "8.3.5"
+  }
+}

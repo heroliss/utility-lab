@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh">
+  <meta charset="utf-8" /><title>Liss Utilities · 浏览器文件事务验收</title>
+  <body
+    style="
+      background: #101825;
+      color: #eaf1fc;
+      font: 16px sans-serif;
+      padding: 25px;
+    "
+  >
+    <h1>浏览器文件事务验收</h1>
+    <p>仅创建浏览器私有 OPFS 临时样本目录，不访问真实文档目录。</p>
+    <button id="run" style="padding: 12px 20px">运行临时样本验收</button>
+    <pre id="result">等待运行</pre>
+    <script type="module">
+      import {
+        scanDirectory,
+        renameFiles,
+        createArchive,
+        fingerprint,
+      } from "../src/file-ops.js";
+      import { makePlan } from "../src/rename-core.js";
+      import { unzipSync, strFromU8 } from "fflate";
+      document.getElementById("run").onclick = async () => {
+        const results = [];
+        let root, name;
+        const check = (label, ok) => {
+          if (!ok) throw new Error(label);
+          results.push({ label, passed: true });
+        };
+        try {
+          root = await navigator.storage.getDirectory();
+          name = "liss-utility-acceptance-" + crypto.randomUUID();
+          const dir = await root.getDirectoryHandle(name, { create: true });
+          for (const [file, text] of [
+            ["第十二章.txt", "真实浏览器文件内容 🚀"],
+            ["第二十一章.txt", "第二个样本"],
+          ]) {
+            const handle = await dir.getFileHandle(file, { create: true }),
+              writer = await handle.createWritable();
+            await writer.write(text);
+            await writer.close();
+          }
+          let rows = makePlan(await scanDirectory(dir)),
+            journal = [];
+          const oldHashes = await Promise.all(
+            rows.map((r) => fingerprint(r.file)),
+          );
+          await renameFiles(dir, rows, { journal });
+          check("两项改名完成", journal.length === 2);
+          for (let i = 0; i < journal.length; i++) {
+            const handle = await dir.getFileHandle(journal[i].after);
+            check(
+              "改名后内容 SHA-256 不变 " + i,
+              (await fingerprint(await handle.getFile())) === oldHashes[i],
+            );
+          }
+          await renameFiles(dir, [...journal].reverse(), { undo: true });
+          check(
+            "原名称全部恢复",
+            (await scanDirectory(dir)).every((f) => f.path.includes("十")),
+          );
+          rows = makePlan(await scanDirectory(dir));
+          const zip = await createArchive(rows),
+            files = unzipSync(new Uint8Array(await zip.arrayBuffer()));
+          check(
+            "ZIP UTF-8 名称与内容正确",
+            strFromU8(files["第12章.txt"]) === "真实浏览器文件内容 🚀",
+          );
+          const conflict = await dir.getFileHandle("第12章.txt", {
+            create: true,
+          });
+          await (await conflict.createWritable()).close();
+          let refused = false;
+          try {
+            await renameFiles(dir, rows);
+          } catch {
+            refused = true;
+          }
+          check("真实文件 API 拒绝目标冲突", refused);
+          document.getElementById("result").textContent = JSON.stringify(
+            { passed: true, results },
+            null,
+            2,
+          );
+        } catch (e) {
+          document.getElementById("result").textContent = JSON.stringify(
+            { passed: false, error: e.message, results },
+            null,
+            2,
+          );
+        } finally {
+          if (root && name) await root.removeEntry(name, { recursive: true });
+          document.getElementById("run").disabled = true;
+        }
+      };
+    </script>
+  </body>
+</html>
